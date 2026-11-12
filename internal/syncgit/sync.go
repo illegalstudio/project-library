@@ -139,12 +139,12 @@ func (r Repo) commit() error {
 	if len(b) == 0 {
 		return nil
 	}
-	_, err = r.git("commit", "-m", "chore: sync prompt library")
+	_, err = r.git("commit", "-m", "chore: sync note library")
 	return err
 }
 
 // Sync finishes local merges before reporting network failures. It never force-pushes.
-// The caller must hold Locked, including the prompt mutation that precedes Sync.
+// The caller must hold Locked, including the note mutation that precedes Sync.
 func (r Repo) Sync() error {
 	if err := r.recoverIndexLock(gitProcessesRunning); err != nil {
 		return err
@@ -215,18 +215,18 @@ func (r Repo) Sync() error {
 // an interrupted local move. Keep the latest edit and archive every alternative.
 func (r Repo) resolveScopeCopies() error {
 	s := store.Store{Root: r.Root}
-	prompts, _, err := s.List("", "", true)
+	notes, _, err := s.List("", "", true)
 	if err != nil {
 		return err
 	}
-	sort.Slice(prompts, func(i, j int) bool {
-		if !prompts[i].Updated.Equal(prompts[j].Updated) {
-			return prompts[i].Updated.After(prompts[j].Updated)
+	sort.Slice(notes, func(i, j int) bool {
+		if !notes[i].Updated.Equal(notes[j].Updated) {
+			return notes[i].Updated.After(notes[j].Updated)
 		}
-		return s.Path(prompts[i]) < s.Path(prompts[j])
+		return s.Path(notes[i]) < s.Path(notes[j])
 	})
-	seen := make(map[string]store.Prompt)
-	for _, p := range prompts {
+	seen := make(map[string]store.Note)
+	for _, p := range notes {
 		winner, duplicate := seen[p.ID]
 		if !duplicate {
 			seen[p.ID] = p
@@ -298,7 +298,7 @@ func (r Repo) resolve() error {
 		if filepath.IsAbs(name) || strings.HasPrefix(filepath.Clean(name), "..") {
 			return errors.New("unsafe conflict path")
 		}
-		// Read blobs from the index, never copy conflict markers into active prompts.
+		// Read blobs from the index, never copy conflict markers into active notes.
 		base, _ := r.git("show", ":1:"+name)
 		ours, oursErr := r.git("show", ":2:"+name)
 		theirs, theirsErr := r.git("show", ":3:"+name)
@@ -319,7 +319,7 @@ func (r Repo) resolve() error {
 			alternative = ours
 			archive = true
 		} else if strings.HasSuffix(name, ".json") {
-			chosen, alternative, archive = mergePrompt(base, ours, theirs)
+			chosen, alternative, archive = mergeNote(base, ours, theirs)
 		} else {
 			archive = string(ours) != string(theirs)
 		}
@@ -352,8 +352,8 @@ func (r Repo) resolve() error {
 	return nil
 }
 
-func mergePrompt(base, ours, theirs []byte) ([]byte, []byte, bool) {
-	var b, o, t store.Prompt
+func mergeNote(base, ours, theirs []byte) ([]byte, []byte, bool) {
+	var b, o, t store.Note
 	validOurs := json.Unmarshal(ours, &o) == nil && store.Validate(o) == nil
 	validTheirs := json.Unmarshal(theirs, &t) == nil && store.Validate(t) == nil
 	if !validOurs && validTheirs {

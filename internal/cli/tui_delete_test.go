@@ -13,13 +13,13 @@ import (
 	"github.com/illegalstudio/prompt-library/internal/syncgit"
 )
 
-func deleteModel(t *testing.T, scope string) (model, store.Prompt) {
+func deleteModel(t *testing.T, scope string) (model, store.Note) {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	home := filepath.Join(t.TempDir(), "library")
 	a := app{store: store.Store{Root: home}, repo: syncgit.Repo{Root: home}, project: "github.com/acme/api"}
-	p, err := store.New("Selected prompt", "Prompt body", scope)
+	p, err := store.New("Selected note", "Note body", scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,8 +55,8 @@ func TestDeleteConfirmationDefaultsToNo(t *testing.T) {
 			if cmd != nil || m.mode != "delete" || m.deleting == nil {
 				t.Fatal("d must open a confirmation without deleting")
 			}
-			if !strings.Contains(m.View(), `Delete "Selected prompt"? [y/N]`) {
-				t.Fatal("confirmation must identify the prompt and default to No")
+			if !strings.Contains(m.View(), `Delete "Selected note"? [y/N]`) {
+				t.Fatal("confirmation must identify the note and default to No")
 			}
 			// Confirmation must not keep the repository locked while waiting for input.
 			if err := m.a.repo.Locked(func() error { return nil }); err != nil {
@@ -68,23 +68,23 @@ func TestDeleteConfirmationDefaultsToNo(t *testing.T) {
 				t.Fatal("cancellation did not return to the list")
 			}
 			if _, err := m.a.store.Find(p.ID); err != nil {
-				t.Fatal("cancellation removed the prompt:", err)
+				t.Fatal("cancellation removed the note:", err)
 			}
 		})
 	}
 }
 
-func TestConfirmedDeleteRemovesOnlySelectedPrompt(t *testing.T) {
+func TestConfirmedDeleteRemovesOnlySelectedNote(t *testing.T) {
 	for _, tt := range []struct{ name, scope, key string }{
 		{"global", "", "y"}, {"project", "github.com/acme/api", "Y"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, p := deleteModel(t, tt.scope)
-			other, _ := store.New("Keep this prompt", "Other body", "")
+			other, _ := store.New("Keep this note", "Other body", "")
 			if err := m.a.repo.Locked(func() error { return m.a.store.Save(other) }); err != nil {
 				t.Fatal(err)
 			}
-			m.prompts = []store.Prompt{other, p}
+			m.notes = []store.Note{other, p}
 			m.cursor = 1
 			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 			m = next.(model)
@@ -99,14 +99,14 @@ func TestConfirmedDeleteRemovesOnlySelectedPrompt(t *testing.T) {
 			}
 			next, _ = m.Update(result)
 			m = next.(model)
-			if m.mode != "browse" || m.cursor != 0 || len(m.prompts) != 1 || m.prompts[0].ID != other.ID {
+			if m.mode != "browse" || m.cursor != 0 || len(m.notes) != 1 || m.notes[0].ID != other.ID {
 				t.Fatal("list or selection not refreshed after deletion")
 			}
 			if _, err := os.Stat(m.a.store.Path(p)); !os.IsNotExist(err) {
-				t.Fatal("selected prompt file remains")
+				t.Fatal("selected note file remains")
 			}
 			if _, err := m.a.store.Find(other.ID); err != nil {
-				t.Fatal("another prompt was removed")
+				t.Fatal("another note was removed")
 			}
 			output, err := exec.Command("git", "-C", m.a.repo.Root, "status", "--porcelain").CombinedOutput()
 			if err != nil || len(output) != 0 {
@@ -116,7 +116,7 @@ func TestConfirmedDeleteRemovesOnlySelectedPrompt(t *testing.T) {
 	}
 }
 
-func TestDeleteLastPromptWorksOffline(t *testing.T) {
+func TestDeleteLastNoteWorksOffline(t *testing.T) {
 	m, p := deleteModel(t, "")
 	if err := m.a.repo.Locked(func() error { return m.a.repo.SetRemote(filepath.Join(t.TempDir(), "unavailable.git")) }); err != nil {
 		t.Fatal(err)
@@ -131,8 +131,8 @@ func TestDeleteLastPromptWorksOffline(t *testing.T) {
 	}
 	next, _ = m.Update(result)
 	m = next.(model)
-	if len(m.prompts) != 0 || m.cursor != 0 || !strings.Contains(m.View(), "No prompts yet") {
-		t.Fatal("last prompt deletion did not show the empty list")
+	if len(m.notes) != 0 || m.cursor != 0 || !strings.Contains(m.View(), "No notes yet") {
+		t.Fatal("last note deletion did not show the empty list")
 	}
 	if _, err := os.Stat(m.a.store.Path(p)); !os.IsNotExist(err) {
 		t.Fatal("offline deletion left the file in place")
@@ -152,7 +152,7 @@ func TestDeleteRejectsChangesAfterConfirmationOpened(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	result := cmd().(resultMsg)
 	if result.err == nil || !strings.Contains(result.err.Error(), "changed") {
-		t.Fatal("a changed prompt was deleted without renewed confirmation")
+		t.Fatal("a changed note was deleted without renewed confirmation")
 	}
 	saved, err := m.a.store.Find(p.ID)
 	if err != nil || saved.Body != changed.Body {
@@ -167,7 +167,7 @@ func TestDeleteIgnoredOutsideIdleList(t *testing.T) {
 			current := m
 			switch state {
 			case "empty":
-				current.prompts = nil
+				current.notes = nil
 			case "busy":
 				current.busy = true
 			case "search":
@@ -232,7 +232,7 @@ func TestDeletePreservesUnreviewedRemoteChanges(t *testing.T) {
 	}
 	next, _ = m.Update(result)
 	m = next.(model)
-	if len(m.prompts) != 1 || m.prompts[0].Body != changed.Body {
+	if len(m.notes) != 1 || m.notes[0].Body != changed.Body {
 		t.Fatal("unreviewed remote content was lost")
 	}
 	// After reviewing the updated record, another explicit confirmation can delete it.
@@ -240,7 +240,7 @@ func TestDeletePreservesUnreviewedRemoteChanges(t *testing.T) {
 	m = next.(model)
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	result = cmd().(resultMsg)
-	if result.err != nil || len(result.prompts) != 0 || !strings.HasPrefix(result.status, "Deleted:") {
-		t.Fatalf("reviewed prompt could not be deleted: %+v", result)
+	if result.err != nil || len(result.notes) != 0 || !strings.HasPrefix(result.status, "Deleted:") {
+		t.Fatalf("reviewed note could not be deleted: %+v", result)
 	}
 }

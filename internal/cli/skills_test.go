@@ -16,7 +16,7 @@ func isolatedSkillHome(t *testing.T) (string, string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	return home, filepath.Join(home, "prompt-data")
+	return home, filepath.Join(home, "note-data")
 }
 func decodeSkillReport(t *testing.T, out string) skillReport {
 	t.Helper()
@@ -26,15 +26,15 @@ func decodeSkillReport(t *testing.T, out string) skillReport {
 	}
 	return result
 }
-func assertNoPromptData(t *testing.T, path string) {
+func assertNoNoteData(t *testing.T, path string) {
 	t.Helper()
 	for _, p := range []string{path, path + ".lock"} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
-			t.Fatalf("skill command created prompt data at %s", p)
+			t.Fatalf("skill command created note data at %s", p)
 		}
 	}
 }
-func TestSkillCommandsWorkWithoutGitOrPromptSetup(t *testing.T) {
+func TestSkillCommandsWorkWithoutGitOrNoteSetup(t *testing.T) {
 	home, library := isolatedSkillHome(t)
 	t.Setenv("PATH", home)
 	out, _, err := run(t, library, "", "skills", "verify", "--json")
@@ -73,7 +73,7 @@ func TestSkillCommandsWorkWithoutGitOrPromptSetup(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertNoPromptData(t, library)
+	assertNoNoteData(t, library)
 }
 func TestSkillsProtectModifiedFilesAndReportPartialFailures(t *testing.T) {
 	home, library := isolatedSkillHome(t)
@@ -120,7 +120,7 @@ func TestSkillsProtectModifiedFilesAndReportPartialFailures(t *testing.T) {
 			t.Fatal(item)
 		}
 	}
-	assertNoPromptData(t, library)
+	assertNoNoteData(t, library)
 }
 func TestSkillTargetsAndNoninteractiveSelection(t *testing.T) {
 	home, library := isolatedSkillHome(t)
@@ -152,7 +152,7 @@ func TestSkillTargetsAndNoninteractiveSelection(t *testing.T) {
 	if _, err := os.Stat(skills.AgentSkillsInstallPath(home)); err != nil {
 		t.Fatal(err)
 	}
-	assertNoPromptData(t, library)
+	assertNoNoteData(t, library)
 }
 func TestSkillTargetCompletionDoesNotInitializeLibrary(t *testing.T) {
 	_, library := isolatedSkillHome(t)
@@ -160,7 +160,7 @@ func TestSkillTargetCompletionDoesNotInitializeLibrary(t *testing.T) {
 	if err != nil || !strings.Contains(out, "agents") || strings.Contains(out, "claude") {
 		t.Fatalf("unexpected completion: %q %v", out, err)
 	}
-	assertNoPromptData(t, library)
+	assertNoNoteData(t, library)
 }
 func TestSkillPickerPreselectsBothAndAllowsDeselection(t *testing.T) {
 	picker := skillPicker{targets: skillTargets(t.TempDir()), chosen: []bool{true, true}}

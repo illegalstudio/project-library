@@ -61,7 +61,7 @@ func newSkillsCommand() *cobra.Command {
 	var asJSON bool
 	group := &cobra.Command{
 		Use: "skills", Short: "Manage the bundled AI agent skill", Args: cobra.NoArgs,
-		// Skill management does not initialize or synchronize the prompt library.
+		// Skill management does not initialize or synchronize the note library.
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error { return nil },
 	}
 	group.PersistentFlags().BoolVar(&asJSON, "json", false, "Print a structured report without prompting")

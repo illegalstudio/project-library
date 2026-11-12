@@ -21,16 +21,16 @@ var muted = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 var selected = lipgloss.NewStyle().Foreground(lipgloss.Color("117")).Bold(true)
 
 type resultMsg struct {
-	prompts []store.Prompt
-	status  string
-	err     error
-	manual  string
-	done    bool
+	notes  []store.Note
+	status string
+	err    error
+	manual string
+	done   bool
 }
 type model struct {
 	a              app
 	mode           string
-	prompts        []store.Prompt
+	notes          []store.Note
 	cursor         int
 	all            bool
 	search         textinput.Model
@@ -39,11 +39,11 @@ type model struct {
 	body           textarea.Model
 	manual         viewport.Model
 	viewer         viewport.Model
-	viewing        *store.Prompt
+	viewing        *store.Note
 	darkBackground bool
 	projectScope   bool
-	editing        *store.Prompt
-	deleting       *store.Prompt
+	editing        *store.Note
+	deleting       *store.Note
 	busy           bool
 	quitting       bool
 	status         string
@@ -55,26 +55,29 @@ func newModel(a app) model {
 	search.Placeholder = "Search title and body"
 	search.CharLimit = 500
 	title := textinput.New()
-	title.Placeholder = "Give this prompt a title"
+	title.Placeholder = "Give this note a title"
 	title.CharLimit = 200
 	remote := textinput.New()
-	remote.Placeholder = "git@github.com:you/prompts.git (blank for local only)"
+	remote.Placeholder = "git@github.com:you/notes.git (blank for local only)"
 	remote.CharLimit = 2048
 	body := textarea.New()
-	body.Placeholder = "Write or paste your prompt here. Newlines are preserved."
+	body.Placeholder = "Write or paste your note here. Newlines are preserved."
 	body.CharLimit = 0
 	body.MaxHeight = 0
 	body.ShowLineNumbers = false
 	body.SetHeight(10)
 	m := model{a: a, mode: "browse", search: search, title: title, remote: remote, body: body, width: 80, height: 24, manual: viewport.New(74, 12), viewer: viewport.New(76, 14), darkBackground: lipgloss.HasDarkBackground()}
 	m.viewer.SetHorizontalStep(4)
-	m.prompts, _, _ = a.store.List(a.project, "", false)
+	m.notes, _, _ = a.store.List(a.project, "", false)
 	if !a.repo.Configured() {
 		m.mode = "setup"
 		m.remote.Focus()
 	} else {
 		m.busy = true
-		m.status = "Syncing..."
+		m.status = "Loading local notes..."
+		if !a.noSync {
+			m.status = "Syncing..."
+		}
 	}
 	return m
 }
@@ -82,7 +85,7 @@ func (m model) Init() tea.Cmd {
 	if m.mode == "setup" {
 		return textinput.Blink
 	}
-	return tea.Batch(textinput.Blink, m.load(true))
+	return tea.Batch(textinput.Blink, m.load(!m.a.noSync))
 }
 func (m model) load(sync bool) tea.Cmd {
 	return func() tea.Msg {
@@ -98,7 +101,7 @@ func (m model) load(sync bool) tea.Cmd {
 		if len(warnings) > 0 {
 			status = strings.Join(warnings, "; ")
 		}
-		return resultMsg{prompts: ps, status: status, err: err}
+		return resultMsg{notes: ps, status: status, err: err}
 	}
 }
 func (m *model) beginAdd() {
@@ -127,7 +130,7 @@ func (m model) listPageSize() int {
 	return max(1, rows)
 }
 
-func (m model) promptRow(p store.Prompt, active bool) string {
+func (m model) noteRow(p store.Note, active bool) string {
 	width := max(1, m.width-4)
 	titleWidth := min(30, max(1, width/3))
 	scopeWidth := 16
@@ -208,8 +211,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.err.Error()
 			return m, nil
 		}
-		m.prompts = msg.prompts
-		m.cursor = min(m.cursor, max(0, len(m.prompts)-1))
+		m.notes = msg.notes
+		m.cursor = min(m.cursor, max(0, len(m.notes)-1))
 		m.status = msg.status
 		if msg.done {
 			m.mode = "browse"
@@ -250,21 +253,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if err := m.a.repo.MarkConfigured(); err != nil {
 							return err
 						}
-						syncErr = m.a.repo.Sync()
+						syncErr = m.a.syncLocked()
 						return nil
 					})
 					if err != nil {
 						return resultMsg{err: err}
 					}
 					ps, warnings, err := m.a.store.List(m.a.project, "", false)
-					status := "Library ready. Press a to add your first prompt."
+					status := "Library ready. Press a to add your first note."
 					if syncErr != nil {
 						status = "Local library ready; sync pending: " + syncErr.Error()
 					}
 					if len(warnings) > 0 {
 						status = strings.Join(warnings, "; ")
 					}
-					return resultMsg{prompts: ps, status: status, err: err, done: true}
+					return resultMsg{notes: ps, status: status, err: err, done: true}
 				}
 			}
 			var cmd tea.Cmd
@@ -305,7 +308,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == "delete" {
 			switch key {
 			case "y", "Y":
-				return m.deletePrompt()
+				return m.deleteNote()
 			case "n", "N", "enter", "esc":
 				m.mode = "browse"
 				m.deleting = nil
@@ -368,7 +371,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Filtering local files is quick and synchronous, avoiding stale asynchronous search results.
 			ps, _, err := m.a.store.List(m.a.project, m.search.Value(), m.all)
 			if err == nil {
-				m.prompts = ps
+				m.notes = ps
 			}
 			return m, cmd
 		}
@@ -383,9 +386,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			m.cursor = max(0, m.cursor-1)
 		case "down", "j":
-			m.cursor = min(max(0, len(m.prompts)-1), m.cursor+1)
+			m.cursor = min(max(0, len(m.notes)-1), m.cursor+1)
 		case "pgdown":
-			m.cursor = min(max(0, len(m.prompts)-1), m.cursor+m.listPageSize())
+			m.cursor = min(max(0, len(m.notes)-1), m.cursor+m.listPageSize())
 		case "pgup":
 			m.cursor = max(0, m.cursor-m.listPageSize())
 		case "s", "/":
@@ -400,8 +403,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			}
 		case "e":
-			if !m.busy && len(m.prompts) > 0 {
-				p := m.prompts[m.cursor]
+			if !m.busy && len(m.notes) > 0 {
+				p := m.notes[m.cursor]
 				m.beginAdd()
 				m.editing = &p
 				m.title.SetValue(p.Title)
@@ -410,8 +413,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			}
 		case "v":
-			if !m.busy && len(m.prompts) > 0 {
-				p := m.prompts[m.cursor]
+			if !m.busy && len(m.notes) > 0 {
+				p := m.notes[m.cursor]
 				m.viewing = &p
 				m.mode = "view"
 				m.renderViewer()
@@ -427,12 +430,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.status = err.Error()
 			} else {
-				m.prompts = ps
+				m.notes = ps
 			}
 			return m, nil
 		case "d":
-			if !m.busy && len(m.prompts) > 0 {
-				p := m.prompts[m.cursor]
+			if !m.busy && len(m.notes) > 0 {
+				p := m.notes[m.cursor]
 				m.deleting = &p
 				m.mode = "delete"
 				m.status = ""
@@ -444,8 +447,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.load(true)
 			}
 		case "enter":
-			if !m.busy && len(m.prompts) > 0 {
-				p := m.prompts[m.cursor]
+			if !m.busy && len(m.notes) > 0 {
+				p := m.notes[m.cursor]
 				m.busy = true
 				m.status = "Copying..."
 				return m, func() tea.Msg {
@@ -460,7 +463,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if err := m.a.store.Save(current); err != nil {
 							return err
 						}
-						syncErr = m.a.repo.Sync()
+						syncErr = m.a.syncLocked()
 						return nil
 					})
 					ps, _, listErr := m.a.store.List(m.a.project, m.search.Value(), m.all)
@@ -473,10 +476,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					manual := ""
 					if clipErr != nil {
-						status = "Clipboard unavailable. Copy the prompt manually."
+						status = "Clipboard unavailable. Copy the note manually."
 						manual = p.Body
 					}
-					return resultMsg{prompts: ps, status: status, err: err, manual: manual}
+					return resultMsg{notes: ps, status: status, err: err, manual: manual}
 				}
 			}
 		}
@@ -498,7 +501,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) deletePrompt() (tea.Model, tea.Cmd) {
+func (m model) deleteNote() (tea.Model, tea.Cmd) {
 	if m.deleting == nil || m.busy {
 		return m, nil
 	}
@@ -514,13 +517,13 @@ func (m model) deletePrompt() (tea.Model, tea.Cmd) {
 			if err != nil {
 				return err
 			}
-			if current.Title != p.Title || current.Body != p.Body || current.Project != p.Project {
-				return fmt.Errorf("prompt changed in another process; select it again before deleting")
+			if store.Revision(current) != store.Revision(p) {
+				return fmt.Errorf("note changed in another process; select it again before deleting")
 			}
 			if err := m.a.store.Delete(current); err != nil {
 				return err
 			}
-			syncErr = m.a.repo.Sync()
+			syncErr = m.a.syncLocked()
 			return nil
 		})
 		if err != nil {
@@ -529,12 +532,12 @@ func (m model) deletePrompt() (tea.Model, tea.Cmd) {
 		ps, _, err := m.a.store.List(m.a.project, m.search.Value(), m.all)
 		status := "Deleted: " + p.Title
 		if _, findErr := m.a.store.Find(p.ID); findErr == nil {
-			status = "Prompt changed during sync and was kept; review it before deleting again"
+			status = "Note changed during sync and was kept; review it before deleting again"
 		}
 		if syncErr != nil {
 			status += "; sync pending: " + syncErr.Error()
 		}
-		return resultMsg{prompts: ps, status: status, err: err, done: true}
+		return resultMsg{notes: ps, status: status, err: err, done: true}
 	}
 }
 
@@ -558,14 +561,14 @@ func (m model) save() (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		var syncErr error
 		err := m.a.repo.Locked(func() error {
-			// Preserve concurrent edits before replacing an existing prompt.
+			// Preserve concurrent edits before replacing an existing note.
 			if m.editing != nil {
 				current, e := m.a.store.Find(p.ID)
 				if e != nil {
 					return e
 				}
-				if current.Title != m.editing.Title || current.Body != m.editing.Body || current.Project != m.editing.Project {
-					return fmt.Errorf("prompt changed in another process; reopen it before editing")
+				if store.Revision(current) != store.Revision(*m.editing) {
+					return fmt.Errorf("note changed in another process; reopen it before editing")
 				}
 				p.LastUsed = current.LastUsed
 				if err := m.a.store.Replace(current, p); err != nil {
@@ -574,7 +577,7 @@ func (m model) save() (tea.Model, tea.Cmd) {
 			} else if err := m.a.store.Save(p); err != nil {
 				return err
 			}
-			syncErr = m.a.repo.Sync()
+			syncErr = m.a.syncLocked()
 			return nil
 		})
 		if err != nil {
@@ -585,7 +588,7 @@ func (m model) save() (tea.Model, tea.Cmd) {
 		if syncErr != nil {
 			status += "; sync pending: " + syncErr.Error()
 		}
-		return resultMsg{prompts: ps, status: status, err: err, done: true}
+		return resultMsg{notes: ps, status: status, err: err, done: true}
 	}
 }
 func (m model) View() string {
@@ -615,7 +618,7 @@ func (m model) View() string {
 		if m.all {
 			scope = "All projects"
 		}
-		b.WriteString("  " + muted.Render(scope) + fmt.Sprintf("  (%d prompts)\n", len(m.prompts)))
+		b.WriteString("  " + muted.Render(scope) + fmt.Sprintf("  (%d notes)\n", len(m.notes)))
 		if m.mode == "search" || m.search.Value() != "" {
 			b.WriteString("\n  " + m.search.View() + "\n\n")
 		} else {
@@ -626,11 +629,11 @@ func (m model) View() string {
 		if m.cursor >= rows {
 			start = m.cursor - rows + 1
 		}
-		for i := start; i < min(len(m.prompts), start+rows); i++ {
-			b.WriteString(m.promptRow(m.prompts[i], i == m.cursor) + "\n")
+		for i := start; i < min(len(m.notes), start+rows); i++ {
+			b.WriteString(m.noteRow(m.notes[i], i == m.cursor) + "\n")
 		}
-		if len(m.prompts) == 0 {
-			b.WriteString("  No prompts yet. Press a to add one.\n")
+		if len(m.notes) == 0 {
+			b.WriteString("  No notes yet. Press a to add one.\n")
 		}
 		if m.mode == "delete" && m.deleting != nil {
 			b.WriteString(fmt.Sprintf("\n  Delete %q? [y/N]\n", preview(m.deleting.Title, max(5, m.width-25))))

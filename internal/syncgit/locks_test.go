@@ -15,7 +15,7 @@ import (
 func TestRecoverOrphanedIndexLock(t *testing.T) {
 	hermetic(t)
 	r := initRepo(t, filepath.Join(t.TempDir(), "library"), "")
-	p, _ := store.New("Retained", "Unsynchronized local prompt", "")
+	p, _ := store.New("Retained", "Unsynchronized local note", "")
 	save(t, r, p)
 	path := filepath.Join(r.Root, ".git", "index.lock")
 	data := []byte("incomplete index retained for inspection")
@@ -37,7 +37,7 @@ func TestRecoverOrphanedIndexLock(t *testing.T) {
 		t.Fatalf("lock contents lost: %q %v", got, err)
 	}
 	if got := find(t, r, p.ID); got.Body != p.Body {
-		t.Fatal("prompt changed during recovery")
+		t.Fatal("note changed during recovery")
 	}
 	clean(t, r)
 }

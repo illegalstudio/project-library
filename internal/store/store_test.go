@@ -14,7 +14,7 @@ func TestFilterSearchOrderAndRoundTrip(t *testing.T) {
 	other, _ := New("Other", "Some content", "github.com/other/api")
 	global.LastUsed = time.Now().UTC()
 	current.LastUsed = global.LastUsed.Add(-time.Hour)
-	for _, p := range []Prompt{global, current, other} {
+	for _, p := range []Note{global, current, other} {
 		if err := s.Save(p); err != nil {
 			t.Fatal(err)
 		}
@@ -43,7 +43,7 @@ func TestFilterSearchOrderAndRoundTrip(t *testing.T) {
 	}
 	ps, w, err = s.List("", "", true)
 	if err != nil || len(w) != 1 || len(ps) != 3 {
-		t.Fatal("one invalid prompt hid the library")
+		t.Fatal("one invalid note hid the library")
 	}
 	p, err := s.Find(global.ID[:8])
 	if err != nil || p.ID != global.ID {
@@ -53,7 +53,7 @@ func TestFilterSearchOrderAndRoundTrip(t *testing.T) {
 		t.Fatal("ambiguous ID accepted")
 	}
 }
-func TestRejectUnsafeAndEmptyPrompt(t *testing.T) {
+func TestRejectUnsafeAndEmptyNote(t *testing.T) {
 	s := Store{Root: t.TempDir()}
 	p, _ := New("Title", "Body", "")
 	p.ID = "../escape"
@@ -63,8 +63,18 @@ func TestRejectUnsafeAndEmptyPrompt(t *testing.T) {
 	if _, err := New(" ", "Body", ""); err == nil {
 		t.Fatal("empty title accepted")
 	}
-	if _, err := New("Title", "\n", ""); err == nil {
-		t.Fatal("empty body accepted")
+	for _, body := range []string{"", "\n", "  "} {
+		p, err := New("Title", body, "")
+		if err != nil {
+			t.Fatal("optional body rejected:", err)
+		}
+		if err := s.Save(p); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Find(p.ID)
+		if err != nil || got.Body != body {
+			t.Fatalf("empty body round trip: %+v %v", got, err)
+		}
 	}
 }
 

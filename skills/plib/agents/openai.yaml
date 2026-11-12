@@ -1,4 +1,4 @@
 interface:
   display_name: "Project Library"
-  short_description: "Find, save and reuse prompts from your library"
-  default_prompt: "Use $plib to find or save prompts in my library."
+  short_description: "Find, read and manage notes in your library"
+  default_prompt: "Use $plib to find, read or save notes in my library."

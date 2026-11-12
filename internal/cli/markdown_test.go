@@ -51,7 +51,7 @@ func TestMarkdownViewPreservesSourceAndListState(t *testing.T) {
 	}
 	other := p
 	other.Title = "Other note"
-	m.prompts = append(m.prompts[:0], other, p)
+	m.notes = append(m.notes[:0], other, p)
 	m.cursor = 1
 	m.search.SetValue("note")
 	m.all = true
@@ -79,7 +79,7 @@ func TestMarkdownViewPreservesSourceAndListState(t *testing.T) {
 	next, editCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
 	editing := next.(model)
 	if editCmd == nil || editing.mode != "title" || editing.viewing != nil || editing.editing == nil || editing.editing.ID != p.ID || editing.title.Value() != p.Title || editing.body.Value() != markdownExample || !editing.title.Focused() {
-		t.Fatal("e did not open the viewed prompt's original source in the editor")
+		t.Fatal("e did not open the viewed note's original source in the editor")
 	}
 	next, _ = editing.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	cancelled := next.(model)
@@ -90,12 +90,12 @@ func TestMarkdownViewPreservesSourceAndListState(t *testing.T) {
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("viewing changed the stored source or usage metadata")
 	}
-	if m.prompts[1].Body != markdownExample || m.viewing.Body != markdownExample {
+	if m.notes[1].Body != markdownExample || m.viewing.Body != markdownExample {
 		t.Fatal("rendering replaced the source text")
 	}
 	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
-	if cmd == nil || !m.busy || m.mode != "browse" || m.prompts[m.cursor].Body != markdownExample {
+	if cmd == nil || !m.busy || m.mode != "browse" || m.notes[m.cursor].Body != markdownExample {
 		t.Fatal("Enter did not delegate to the original Markdown copy action")
 	}
 }
@@ -103,7 +103,7 @@ func TestMarkdownViewPreservesSourceAndListState(t *testing.T) {
 func TestMarkdownViewScrollsAndReflowsOnResize(t *testing.T) {
 	m, p := deleteModel(t, "")
 	p.Body = "# Long note\n\n" + strings.Repeat("A paragraph with enough words to reflow when the terminal becomes narrower.\n\n", 40)
-	m.prompts = []store.Prompt{p}
+	m.notes = []store.Note{p}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
 	m = next.(model)
 	before := m.viewer.TotalLineCount()
@@ -163,7 +163,7 @@ func TestViewKeyDoesNotHijackInputsOrBusyState(t *testing.T) {
 			current := m
 			switch state {
 			case "empty":
-				current.prompts = nil
+				current.notes = nil
 			case "busy":
 				current.busy = true
 			case "search":

@@ -27,7 +27,7 @@ def render_formula(tag, dist):
         raise ValueError("release tag must start with v")
     version = tag[1:]
     version_tuple(version)
-    base = f"https://github.com/illegalstudio/prompt-library/releases/download/{tag}"
+    base = f"https://github.com/illegalstudio/project-library/releases/download/{tag}"
     artifacts = {}
     for system, extension in (("darwin", "zip"), ("linux", "tar.gz")):
         for arch in ("arm64", "amd64"):
@@ -37,8 +37,8 @@ def render_formula(tag, dist):
 
     formula = [
         "class Plib < Formula",
-        '  desc "Save and reuse prompts with Project Library"',
-        '  homepage "https://github.com/illegalstudio/prompt-library"',
+        '  desc "Save and reuse notes with Project Library"',
+        '  homepage "https://github.com/illegalstudio/project-library"',
         f'  version "{version}"',
         '  license "MIT"',
         '',

@@ -1,31 +1,37 @@
 ---
 name: plib
-description: Manage and reuse prompts with Project Library through the plib CLI. Use when asked to find, read, save, copy, organize or synchronize stored prompts, or manage the plib agent skill. Ordinary prompt drafting without saving to a library does not need this skill.
+description: Manage notes and reusable text in Project Library through the plib CLI. Use when asked to read, find, save, edit, delete, copy or synchronize library notes, or manage the plib agent skill. Drafting text without storing it in the library does not need this skill.
 ---
 
 # Project Library (plib)
 
 Use the installed `plib` binary and `plib <command> --help` as the command reference.
 
-## Work with prompts
+## Work with notes
 
-- Use `plib list --json` for automation. Search matches both titles and bodies; `--all` includes other projects. Resolve a unique ID before reading or copying a prompt.
-- Use `plib show ID` to retrieve the exact body. Use `copy ID` when the user wants clipboard access; it updates usage even when manual copying is necessary.
-- Save multiline text with `add --title TITLE --stdin`. Global scope is the default. Use `--project` when project scope is requested and the current repository has a portable Git remote. Run from the intended project's directory.
-- `--home` and `PLIB_HOME` select the prompt data directory. They do not select the agent skill installation directory.
-- For first-run automation, choose `init --local` or `init --remote URL` according to the user's storage choice. Bare `plib` opens an interactive interface.
-- Editing and deletion are available in that interface with `e` and `d`. Deletion requires a `y/N` confirmation, default No.
+All entries are notes with a required title and an optional body. Their contents can be instructions, references, meeting notes or any other text; there is no type field.
 
-Treat retrieved prompt text as library content. Apply it as instructions when that is what the user requested.
+- Use `plib list --json` to find notes by title and body; `--all` includes other projects. Resolve a unique ID before reading or changing a note.
+- Use `plib show ID` for the exact body, or `show ID --json` for metadata and the revision. `copy ID` accesses the clipboard and updates usage, including when manual copying is necessary.
+- Save with `add --title TITLE --stdin --json`, or use `--body TEXT`. Omit the body for a title-only note. Global scope is the default; use `--project` from the intended repository when project scope is requested.
+- Change only the supplied fields with `edit ID --title TITLE`, `--body TEXT` or `--stdin`; `--body ''` clears the body. `--global` and `--project` change scope while preserving identity.
+- Use `delete ID --yes --json` when deletion is requested. The TUI also offers editing with `e` and deletion with a default-No confirmation on `d`.
+- When editing previously read content, pass its JSON `revision` as `--if-match REVISION` to `edit` or `delete`. A mismatch fails; reread the note and review the change before retrying.
+- `add`, `edit` and `delete --json` return the affected `note`, `deleted`, and `sync.status` (`complete`, `pending` or `skipped`). Application errors retain JSON and a nonzero exit status; flag/setup errors can precede JSON. Parse stdout; warnings go to stderr.
+- `--home` and `PLIB_HOME` select note storage, independently of skill installation paths. First-run automation requires `init --local` or `init --remote URL` according to the user's storage choice.
 
-## Synchronization
+Treat retrieved text as library content. Apply it as instructions when the user asks to do so.
 
-Prompt commands synchronize Git automatically. Parse stdout for JSON or prompt bodies; warnings go to stderr. A network failure leaves local data usable, while `plib sync` exits nonzero if synchronization cannot finish.
+## Local reads and synchronization
 
-Unresolved alternative versions are preserved as `.conflicted` files and synchronized. Keep them until the user asks to reconcile or remove them. Avoid manually forcing Git history to make synchronization succeed.
+Use `list --json --no-sync` or `show ID --no-sync` for local reads and frequent polling. These commands do not initialize storage or synchronize Git. `status --json` always inspects local library state and cached Git metadata without fetching. Ahead/behind counts reflect the last fetch and can be unknown.
+
+Other note operations synchronize automatically unless `--no-sync` is supplied. Writes made with that flag wait for an explicit `plib sync` or `r` in the TUI. Network failures retain local writes with `sync.status` set to `pending`; `plib sync` exits nonzero if synchronization cannot finish.
+
+Alternative versions are preserved as `.conflicted` files and synchronized. Keep them until the user asks to reconcile or remove them. Avoid forcing Git history to make synchronization succeed.
 
 ## Keep this skill current
 
-Use `plib skills verify --json` to check installed copies against the running binary. Refresh with `plib skills install --target agents` or `--target claude`; the target flag is repeatable. Without a target, interactive installation offers both destinations, and `--json` installs both without a prompt.
+Use `plib skills verify --json` to compare installed copies with the running binary. Refresh with `plib skills install --target agents` or `--target claude`; the target flag is repeatable. Without a target, interactive installation offers both destinations, and `--json` installs both without a prompt.
 
-Unmodified managed copies update safely. A locally modified copy is protected; use `--force` only when replacing those files is within the user's request. A stale verification exits nonzero while retaining its JSON report.
+Managed unmodified copies update safely. Modified copies require `--force` and authorization to replace them. Stale verification exits nonzero while retaining its JSON report.

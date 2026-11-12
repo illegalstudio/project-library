@@ -40,7 +40,7 @@ func TestCLILocalWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ps []store.Prompt
+	var ps []store.Note
 	if json.Unmarshal([]byte(out), &ps) != nil || len(ps) != 1 {
 		t.Fatal(out)
 	}
@@ -48,8 +48,8 @@ func TestCLILocalWorkflow(t *testing.T) {
 	if err != nil || out != body {
 		t.Fatalf("body round trip: %q %v", out, err)
 	}
-	if _, _, err := run(t, home, "", "add", "--title", "Invalid", "--body", " "); err == nil {
-		t.Fatal("invalid prompt accepted")
+	if _, _, err := run(t, home, "", "add", "--title", " ", "--body", "Body"); err == nil {
+		t.Fatal("invalid note accepted")
 	}
 	if _, _, err := run(t, home, "", "init", "--local"); err == nil {
 		t.Fatal("reinitialization accepted")
@@ -167,7 +167,7 @@ func TestEditorScopeSwitchAndSave(t *testing.T) {
 				m := newModel(a)
 				m.busy = false
 				m.all = true
-				m.prompts, _, _ = a.store.List("", "", true)
+				m.notes, _, _ = a.store.List("", "", true)
 				key := "e"
 				if kind == "new" {
 					key = "a"
@@ -214,10 +214,10 @@ func TestEditorScopeSwitchAndSave(t *testing.T) {
 					scope = a.project
 				}
 				if p.Project != scope || p.Title != original.Title || p.Body != original.Body {
-					t.Fatalf("unexpected saved prompt: %+v", p)
+					t.Fatalf("unexpected saved note: %+v", p)
 				}
 				if kind != "new" && (p.ID != original.ID || !p.Created.Equal(original.Created) || !p.LastUsed.Equal(original.LastUsed)) {
-					t.Fatal("scope move changed prompt identity or usage")
+					t.Fatal("scope move changed note identity or usage")
 				}
 				if kind != "new" {
 					if _, err := os.Stat(a.store.Path(original)); !os.IsNotExist(err) {

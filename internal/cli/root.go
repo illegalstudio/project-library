@@ -27,15 +27,17 @@ type app struct {
 	project string
 	out     io.Writer
 	errOut  io.Writer
+	noSync  bool
 }
 
 func Execute() error { return NewCommand().Execute() }
 
 func NewCommand() *cobra.Command {
 	var home string
+	var noSync bool
 	var a app
 	root := &cobra.Command{
-		Use: "plib", Short: "Project Library: your prompts, wherever you work",
+		Use: "plib", Short: "Project Library: your notes, wherever you work",
 		Version:      version.Version + " (" + version.Commit + ")",
 		SilenceUsage: true, SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -53,28 +55,32 @@ func NewCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			a = app{store: store.Store{Root: home}, repo: syncgit.Repo{Root: home}, out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr()}
+			a = app{store: store.Store{Root: home}, repo: syncgit.Repo{Root: home}, out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr(), noSync: noSync}
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
 			}
 			a.project, err = project.Identity(cwd)
 			if err != nil {
-				fmt.Fprintln(a.errOut, "Project not recognized; showing global prompts:", err)
+				fmt.Fprintln(a.errOut, "Project not recognized; showing global notes:", err)
 				a.project = ""
+			}
+			if cmd.Name() == "status" || (noSync && (cmd.Name() == "list" || cmd.Name() == "show")) {
+				return nil
 			}
 			return a.repo.Locked(a.repo.Init)
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) { maybeNoticeStaleSkills(cmd) },
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-				return errors.New("interactive mode requires a terminal; use plib init, add, list, show or copy")
+				return errors.New("interactive mode requires a terminal; use plib init, add, edit, delete, list, show, copy or status")
 			}
 			_, err := tea.NewProgram(newModel(a), tea.WithAltScreen(), tea.WithOutput(cmd.OutOrStdout())).Run()
 			return err
 		},
 		Args: cobra.NoArgs,
 	}
+	root.PersistentFlags().BoolVar(&noSync, "no-sync", false, "Use local data without automatic Git synchronization")
 	root.PersistentFlags().StringVar(&home, "home", "", "Library directory (default ~/.plib, or PLIB_HOME)")
 	initCmd := &cobra.Command{Use: "init", Short: "Initialize local storage and optionally connect a remote", Args: cobra.NoArgs}
 	var remote string
@@ -98,7 +104,7 @@ func NewCommand() *cobra.Command {
 			if err := a.repo.MarkConfigured(); err != nil {
 				return err
 			}
-			a.warn(a.repo.Sync())
+			a.warn(a.syncLocked())
 			return nil
 		}); err != nil {
 			return err
@@ -109,7 +115,7 @@ func NewCommand() *cobra.Command {
 	root.AddCommand(initCmd)
 	listCmd := &cobra.Command{Use: "list [query]", Aliases: []string{"ls", "search"}, Short: "List or search titles and bodies, most recently used first", Args: cobra.MaximumNArgs(1)}
 	var all, asJSON bool
-	listCmd.Flags().BoolVar(&all, "all", false, "Include prompts from every project")
+	listCmd.Flags().BoolVar(&all, "all", false, "Include notes from every project")
 	listCmd.Flags().BoolVar(&asJSON, "json", false, "Print JSON")
 	listCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if err := a.ready(); err != nil {
@@ -128,75 +134,25 @@ func NewCommand() *cobra.Command {
 			fmt.Fprintln(a.errOut, w)
 		}
 		if asJSON {
-			return json.NewEncoder(a.out).Encode(ps)
+			return json.NewEncoder(a.out).Encode(notesJSON(ps))
 		}
 		for _, p := range ps {
 			fmt.Fprintf(a.out, "%s  %s [%s]\n  %s\n", p.ID[:8], p.Title, scopeLabel(p), preview(p.Body, 90))
 		}
 		if len(ps) == 0 {
-			fmt.Fprintln(a.out, "No prompts yet. Run plib and press a to add one.")
+			fmt.Fprintln(a.out, "No notes yet. Run plib and press a to add one.")
 		}
 		return nil
 	}
 	root.AddCommand(listCmd)
-	var title, body string
-	var global, projectOnly, stdin bool
-	add := &cobra.Command{Use: "add", Short: "Add a prompt, or open the multiline form", Args: cobra.NoArgs}
-	add.Flags().StringVar(&title, "title", "", "Prompt title")
-	add.Flags().StringVar(&body, "body", "", "Prompt body")
-	add.Flags().BoolVar(&stdin, "stdin", false, "Read the complete body from standard input")
-	add.Flags().BoolVar(&global, "global", false, "Save globally (default)")
-	add.Flags().BoolVar(&projectOnly, "project", false, "Save for the current Git remote")
-	add.MarkFlagsMutuallyExclusive("global", "project")
-	add.MarkFlagsMutuallyExclusive("body", "stdin")
-	add.RunE = func(cmd *cobra.Command, args []string) error {
-		if err := a.ready(); err != nil {
-			return err
-		}
-		if projectOnly && a.project == "" {
-			return errors.New("project prompts require a Git repository with a portable remote URL")
-		}
-		if title == "" && !stdin && !cmd.Flags().Changed("body") {
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return errors.New("use --title and --stdin or --body outside a terminal")
-			}
-			m := newModel(a)
-			m.beginAdd()
-			m.projectScope = projectOnly
-			_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(a.out)).Run()
-			return err
-		}
-		if stdin {
-			b, err := io.ReadAll(cmd.InOrStdin())
-			if err != nil {
-				return err
-			}
-			body = string(b)
-		}
-		scope := ""
-		if projectOnly {
-			scope = a.project
-		}
-		p, err := store.New(title, body, scope)
-		if err != nil {
-			return err
-		}
-		if err := a.repo.Locked(func() error {
-			if err := a.store.Save(p); err != nil {
-				return err
-			}
-			a.warn(a.repo.Sync())
-			return nil
-		}); err != nil {
-			return err
-		}
-		fmt.Fprintln(a.out, "Saved", p.ID)
-		return nil
-	}
-	root.AddCommand(add)
+	root.AddCommand(newAddCommand(&a), newEditCommand(&a), newDeleteCommand(&a), newStatusCommand(&a))
 	for _, name := range []string{"show", "copy"} {
 		name := name
-		cmd := &cobra.Command{Use: name + " ID", Short: map[string]string{"show": "Print a prompt body", "copy": "Copy a prompt and update its last usage"}[name], Args: cobra.ExactArgs(1)}
+		cmd := &cobra.Command{Use: name + " ID", Short: map[string]string{"show": "Print a note body", "copy": "Copy a note and update its last usage"}[name], Args: cobra.ExactArgs(1)}
+		var showJSON bool
+		if name == "show" {
+			cmd.Flags().BoolVar(&showJSON, "json", false, "Print the note and its revision as JSON")
+		}
 		cmd.RunE = func(cmd *cobra.Command, args []string) error {
 			if err := a.ready(); err != nil {
 				return err
@@ -207,12 +163,15 @@ func NewCommand() *cobra.Command {
 				return err
 			}
 			if name == "show" {
+				if showJSON {
+					return json.NewEncoder(a.out).Encode(noteJSON(p))
+				}
 				fmt.Fprint(a.out, p.Body)
 				return nil
 			}
 			clipErr := clipboard.Write(p.Body)
 			if clipErr != nil {
-				fmt.Fprintln(a.errOut, "Clipboard unavailable. Copy this prompt manually:")
+				fmt.Fprintln(a.errOut, "Clipboard unavailable. Copy this note manually:")
 				fmt.Fprintln(a.out, p.Body)
 			} else {
 				fmt.Fprintln(a.out, "Copied:", p.Title)
@@ -247,7 +206,7 @@ func NewCommand() *cobra.Command {
 			if err := a.repo.SetRemote(args[0]); err != nil {
 				return err
 			}
-			a.warn(a.repo.Sync())
+			a.warn(a.syncLocked())
 			fmt.Fprintln(a.out, "Remote saved")
 			return nil
 		})
@@ -274,7 +233,17 @@ func (a app) warn(err error) {
 		fmt.Fprintln(a.errOut, "Sync pending; local data retained:", err)
 	}
 }
-func (a app) sync() { a.warn(a.repo.Locked(a.repo.Sync)) }
+func (a app) syncLocked() error {
+	if a.noSync {
+		return nil
+	}
+	return a.repo.Sync()
+}
+func (a app) sync() {
+	if !a.noSync {
+		a.warn(a.repo.Locked(a.repo.Sync))
+	}
+}
 func (a app) touch(id string) error {
 	return a.repo.Locked(func() error {
 		p, err := a.store.Find(id)
@@ -285,11 +254,11 @@ func (a app) touch(id string) error {
 		if err := a.store.Save(p); err != nil {
 			return err
 		}
-		a.warn(a.repo.Sync())
+		a.warn(a.syncLocked())
 		return nil
 	})
 }
-func scopeLabel(p store.Prompt) string {
+func scopeLabel(p store.Note) string {
 	if p.Project == "" {
 		return "global"
 	}

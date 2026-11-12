@@ -60,13 +60,13 @@ func clean(t *testing.T, r Repo) {
 		t.Fatal("merge still in progress")
 	}
 }
-func save(t *testing.T, r Repo, p store.Prompt) {
+func save(t *testing.T, r Repo, p store.Note) {
 	t.Helper()
 	if err := (store.Store{Root: r.Root}).Save(p); err != nil {
 		t.Fatal(err)
 	}
 }
-func find(t *testing.T, r Repo, id string) store.Prompt {
+func find(t *testing.T, r Repo, id string) store.Note {
 	t.Helper()
 	p, err := (store.Store{Root: r.Root}).Find(id)
 	if err != nil {
@@ -74,14 +74,14 @@ func find(t *testing.T, r Repo, id string) store.Prompt {
 	}
 	return p
 }
-func setupPair(t *testing.T) (Repo, Repo, string, store.Prompt) {
+func setupPair(t *testing.T) (Repo, Repo, string, store.Note) {
 	t.Helper()
 	hermetic(t)
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
 	git(t, root, "init", "--bare", "--initial-branch=main", remote)
 	a := initRepo(t, filepath.Join(root, "a"), remote)
-	p, _ := store.New("Review", "Original\nmultiline prompt", "")
+	p, _ := store.New("Review", "Original\nmultiline note", "")
 	save(t, a, p)
 	syncRepo(t, a)
 	b := initRepo(t, filepath.Join(root, "b"), remote)
@@ -102,11 +102,33 @@ func TestOfflineLocalCommitAndRecovery(t *testing.T) {
 	}
 	clean(t, r)
 	if find(t, r, p.ID).Body != p.Body {
-		t.Fatal("offline prompt lost")
+		t.Fatal("offline note lost")
 	}
 	git(t, root, "init", "--bare", "--initial-branch=main", filepath.Join(root, "missing.git"))
 	syncRepo(t, r)
 	clean(t, r)
+}
+
+func TestEmptyBodyMergesWithIndependentTitleEdit(t *testing.T) {
+	a, b, _, p := setupPair(t)
+	cleared := p
+	cleared.Body = ""
+	cleared.Updated = p.Updated.Add(time.Second)
+	save(t, a, cleared)
+	syncRepo(t, a)
+	renamed := p
+	renamed.Title = "Renamed remotely"
+	renamed.Updated = p.Updated.Add(2 * time.Second)
+	save(t, b, renamed)
+	syncRepo(t, b)
+	syncRepo(t, a)
+	for _, r := range []Repo{a, b} {
+		got := find(t, r, p.ID)
+		if got.Body != "" || got.Title != renamed.Title {
+			t.Fatal("empty body was treated as damaged content", got)
+		}
+		clean(t, r)
+	}
 }
 func TestConcurrentContentConflict(t *testing.T) {
 	a, b, _, p := setupPair(t)
@@ -133,7 +155,7 @@ func TestConcurrentContentConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var alternative store.Prompt
+	var alternative store.Note
 	if json.Unmarshal(raw, &alternative) != nil || alternative.Body != local.Body {
 		t.Fatal("alternative version lost")
 	}
@@ -187,7 +209,7 @@ func TestModifyDeleteConflictKeepsContent(t *testing.T) {
 			syncRepo(t, b)
 			clean(t, b)
 			if got := find(t, b, p.ID); got.Body != p.Body {
-				t.Fatal("modified prompt lost")
+				t.Fatal("modified note lost")
 			}
 		})
 	}
@@ -217,7 +239,7 @@ func TestUnrelatedLibrariesAndMasterBranch(t *testing.T) {
 	clean(t, b)
 	ps, _, err := (store.Store{Root: b.Root}).List("", "", true)
 	if err != nil || len(ps) != 2 {
-		t.Fatal("unrelated history lost prompts")
+		t.Fatal("unrelated history lost notes")
 	}
 	syncRepo(t, a)
 	if find(t, a, q.ID).Body != q.Body {
@@ -247,7 +269,7 @@ func TestResumeInterruptedMerge(t *testing.T) {
 	}
 }
 
-func TestConcurrentPushRetriesPreserveBothPrompts(t *testing.T) {
+func TestConcurrentPushRetriesPreserveBothNotes(t *testing.T) {
 	a, b, _, _ := setupPair(t)
 	p, _ := store.New("From A", "Concurrent addition A", "")
 	q, _ := store.New("From B", "Concurrent addition B", "")
@@ -267,7 +289,7 @@ func TestConcurrentPushRetriesPreserveBothPrompts(t *testing.T) {
 	clean(t, b)
 	for _, r := range []Repo{a, b} {
 		if find(t, r, p.ID).Body != p.Body || find(t, r, q.ID).Body != q.Body {
-			t.Fatal("a concurrent push lost a prompt")
+			t.Fatal("a concurrent push lost a note")
 		}
 	}
 }
@@ -297,7 +319,7 @@ func TestConflictRestoresValidRecordAndArchivesDamagedLocal(t *testing.T) {
 	}
 }
 
-func TestConcurrentScopeMovesPreserveOneUsablePrompt(t *testing.T) {
+func TestConcurrentScopeMovesPreserveOneUsableNote(t *testing.T) {
 	a, b, _, p := setupPair(t)
 	local := p
 	local.Project = "github.com/acme/a"
@@ -317,14 +339,14 @@ func TestConcurrentScopeMovesPreserveOneUsablePrompt(t *testing.T) {
 	clean(t, b)
 	ps, warnings, err := (store.Store{Root: b.Root}).List("", "", true)
 	if err != nil || len(warnings) != 0 || len(ps) != 1 {
-		for _, candidate := range []store.Prompt{local, remote} {
+		for _, candidate := range []store.Note{local, remote} {
 			data, _ := os.ReadFile((store.Store{Root: b.Root}).Path(candidate))
 			t.Logf("scope %s: %s", candidate.Project, data)
 		}
-		t.Fatalf("concurrent scope moves left duplicate or invalid prompts: %+v %v %v", ps, warnings, err)
+		t.Fatalf("concurrent scope moves left duplicate or invalid notes: %+v %v %v", ps, warnings, err)
 	}
 	if ps[0].ID != p.ID {
-		t.Fatal("scope conflict lost prompt identity")
+		t.Fatal("scope conflict lost note identity")
 	}
 	if ps[0].Project != remote.Project || !ps[0].LastUsed.Equal(local.LastUsed) {
 		t.Fatal("scope resolution lost the latest edit or usage")
@@ -334,7 +356,7 @@ func TestConcurrentScopeMovesPreserveOneUsablePrompt(t *testing.T) {
 		t.Fatal("alternative scope was not archived")
 	}
 	data, err := os.ReadFile(archives[0])
-	var alternative store.Prompt
+	var alternative store.Note
 	if err != nil || json.Unmarshal(data, &alternative) != nil || alternative.Project != local.Project {
 		t.Fatal("scope archive does not preserve the alternative record")
 	}
