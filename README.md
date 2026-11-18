@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="https://illegal.studio/en/products/prompt-library"><strong>Official website</strong></a>
+  <a href="https://illegal.studio/en/products/project-library"><strong>Official website</strong></a>
 </p>
 
 ---
